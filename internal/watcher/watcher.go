@@ -44,11 +44,14 @@ type Config struct {
 	MinAmount     float64
 	MaxAmount     float64
 	FilterAddress common.Address // zero value means no filter
+	OutputFormat  OutputFormat
+	OutputPath    string // only used when OutputFormat is not FormatStdout
 }
 
 type Watcher struct {
 	client *ethclient.Client
 	cfg    Config
+	writer transferWriter
 }
 
 var chainNames = map[int64]string{
@@ -84,11 +87,16 @@ func Dial(ctx context.Context, rpcURL string) (*ethclient.Client, error) {
 	return client, nil
 }
 
-func New(client *ethclient.Client, cfg Config) *Watcher {
-	return &Watcher{client: client, cfg: cfg}
+func New(client *ethclient.Client, cfg Config) (*Watcher, error) {
+	writer, err := newTransferWriter(cfg.OutputFormat, cfg.OutputPath)
+	if err != nil {
+		return nil, fmt.Errorf("open output: %w", err)
+	}
+	return &Watcher{client: client, cfg: cfg, writer: writer}, nil
 }
 
 func (w *Watcher) Close() {
+	w.writer.close()
 	w.client.Close()
 }
 
@@ -153,6 +161,14 @@ func (w *Watcher) printLog(l types.Log) {
 		return
 	}
 
-	fmt.Printf("block=%-9d  tx=%s\n  from=%s\n  to  =%s\n  amount=%.2f %s\n",
-		l.BlockNumber, l.TxHash.Hex(), from.Hex(), to.Hex(), amount, w.cfg.Token.Symbol)
+	if err := w.writer.write(transferRecord{
+		Block:  l.BlockNumber,
+		TxHash: l.TxHash.Hex(),
+		From:   from.Hex(),
+		To:     to.Hex(),
+		Amount: amount,
+		Symbol: w.cfg.Token.Symbol,
+	}); err != nil {
+		log.Printf("write error: %v", err)
+	}
 }

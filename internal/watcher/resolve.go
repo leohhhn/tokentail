@@ -11,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-
 const minimalERC20ABI = `[
   {"name":"symbol",  "type":"function","inputs":[],"outputs":[{"name":"","type":"string"}],"stateMutability":"view"},
   {"name":"decimals","type":"function","inputs":[],"outputs":[{"name":"","type":"uint8"}], "stateMutability":"view"}

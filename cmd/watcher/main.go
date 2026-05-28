@@ -44,7 +44,10 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	w := watcher.New(client, cfg)
+	w, err := watcher.New(client, cfg)
+	if err != nil {
+		log.Fatalf("init watcher: %v", err)
+	}
 	defer w.Close()
 
 	log.Println("watcher started — press Ctrl+C to stop")
@@ -96,6 +99,8 @@ func promptConfig(ctx context.Context, client *ethclient.Client) (watcher.Config
 		maxAmountStr string
 		filterByAddr bool
 		filterAddr   string
+		outputFmt    watcher.OutputFormat
+		outputPath   string
 	)
 
 	form := huh.NewForm(
@@ -163,6 +168,30 @@ func promptConfig(ctx context.Context, client *ethclient.Client) (watcher.Config
 		).WithHideFunc(func() bool {
 			return !filterByAddr
 		}),
+		huh.NewGroup(
+			huh.NewSelect[watcher.OutputFormat]().
+				Title("Output format").
+				Options(
+					huh.NewOption("Print to terminal", watcher.FormatStdout),
+					huh.NewOption("CSV file", watcher.FormatCSV),
+					huh.NewOption("Markdown table", watcher.FormatMarkdown),
+				).
+				Value(&outputFmt),
+		),
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Output file path").
+				Placeholder("transfers.csv").
+				Validate(func(s string) error {
+					if strings.TrimSpace(s) == "" {
+						return fmt.Errorf("file path cannot be empty")
+					}
+					return nil
+				}).
+				Value(&outputPath),
+		).WithHideFunc(func() bool {
+			return outputFmt == watcher.FormatStdout
+		}),
 	)
 
 	if err := form.Run(); err != nil {
@@ -192,9 +221,11 @@ func promptConfig(ctx context.Context, client *ethclient.Client) (watcher.Config
 	}
 
 	cfg := watcher.Config{
-		Token:     token,
-		MinAmount: minAmount,
-		MaxAmount: maxAmount,
+		Token:        token,
+		MinAmount:    minAmount,
+		MaxAmount:    maxAmount,
+		OutputFormat: outputFmt,
+		OutputPath:   outputPath,
 	}
 	if filterByAddr {
 		cfg.FilterAddress = common.HexToAddress(filterAddr)
