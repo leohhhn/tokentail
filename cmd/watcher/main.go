@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/charmbracelet/huh"
@@ -16,14 +17,18 @@ import (
 	"github.com/leohhhn/evm-watcher/internal/watcher"
 )
 
-const customIdx = -1
-
 func main() {
+	// Try loading .env file
 	_ = godotenv.Load()
 
 	rpcURL := os.Getenv("ETH_RPC_URL")
 	if rpcURL == "" {
-		log.Fatal("ETH_RPC_URL is required (use a WebSocket URL: wss://...)")
+		// Try prompting the user for the RPC URL if it's not set in .env
+		var err error
+		rpcURL, err = promptRPCURL()
+		if err != nil {
+			log.Fatalf("rpc url: %v", err)
+		}
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -48,7 +53,35 @@ func main() {
 	}
 }
 
+func promptRPCURL() (string, error) {
+	var url string
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("RPC URL").
+				Description("A WebSocket URL is required for live log subscriptions.").
+				Placeholder("wss://...").
+				Validate(func(s string) error {
+					if !strings.HasPrefix(s, "ws://") && !strings.HasPrefix(s, "wss://") {
+						return fmt.Errorf("must be a WebSocket URL starting with ws:// or wss://")
+					}
+					return nil
+				}).
+				Value(&url),
+		),
+	)
+	if err := form.Run(); err != nil {
+		return "", err
+	}
+	return url, nil
+}
+
 func promptConfig(ctx context.Context, client *ethclient.Client) (watcher.Config, error) {
+	// customIdx is the sentinel value bound to the "Custom address..." option in
+	// the token select. -1 is intentionally out of range of watcher.Tokens indices
+	// (which are 0-based), so it can never collide with a real token index.
+	const customIdx = -1
+
 	// Build select options: predefined tokens + custom.
 	options := make([]huh.Option[int], len(watcher.Tokens)+1)
 	for i, t := range watcher.Tokens {

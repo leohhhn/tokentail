@@ -13,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
-// add per-address filter
 // add chain filter
 // add option to write out to file instead of stdout
 
@@ -112,7 +111,13 @@ func (w *Watcher) Start(ctx context.Context) error {
 	}
 	defer sub.Unsubscribe()
 
-	log.Printf("watching %s transfers (min %.2f %s)", w.cfg.Token.Symbol, w.cfg.MinAmount, w.cfg.Token.Symbol)
+	log.Printf("watching %s transfers (min %.2f %s, max %.2f %s) ",
+		w.cfg.Token.Symbol,
+		w.cfg.MinAmount,
+		w.cfg.Token.Symbol,
+		w.cfg.MaxAmount,
+		w.cfg.Token.Symbol,
+	)
 
 	for {
 		select {
