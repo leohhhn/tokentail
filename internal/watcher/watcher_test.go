@@ -4,12 +4,32 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/leohhhn/tokentail/internal/storage"
 	"github.com/leohhhn/tokentail/internal/storage/memory"
 )
+
+// mockBlockTime is the fixed Unix timestamp returned by mockClient for all blocks.
+const mockBlockTime = 1_700_000_000
+
+// mockClient is a minimal EthClient that returns a fixed block header timestamp.
+type mockClient struct{}
+
+func (m *mockClient) ChainID(_ context.Context) (*big.Int, error) { return big.NewInt(1), nil }
+func (m *mockClient) HeaderByNumber(_ context.Context, _ *big.Int) (*types.Header, error) {
+	return &types.Header{Time: mockBlockTime}, nil
+}
+func (m *mockClient) SubscribeFilterLogs(_ context.Context, _ ethereum.FilterQuery, _ chan<- types.Log) (ethereum.Subscription, error) {
+	return nil, nil
+}
+func (m *mockClient) CallContract(_ context.Context, _ ethereum.CallMsg, _ *big.Int) ([]byte, error) {
+	return nil, nil
+}
+func (m *mockClient) Close() {}
 
 // buildLog constructs a synthetic ERC-20 Transfer log for use in tests.
 // from and to are packed as left-padded 32-byte topics; amount is ABI-encoded
@@ -36,7 +56,7 @@ func buildLog(block uint64, from, to common.Address, amount *big.Int) types.Log 
 func newTestWatcher(cfg Config, store *memory.Store) *Watcher {
 	cfg.Store = store
 	return &Watcher{
-		client: nil, // not needed for printLog tests
+		client: &mockClient{},
 		cfg:    cfg,
 		writer: &stdoutWriter{},
 	}
@@ -217,6 +237,10 @@ func TestPrintLog_StorageFields(t *testing.T) {
 	}
 	if got.Token != "USDC" {
 		t.Errorf("Token: got %s, want USDC", got.Token)
+	}
+	wantTime := time.Unix(mockBlockTime, 0).UTC()
+	if !got.Timestamp.Equal(wantTime) {
+		t.Errorf("Timestamp: got %v, want %v", got.Timestamp, wantTime)
 	}
 }
 

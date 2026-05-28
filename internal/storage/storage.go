@@ -15,7 +15,8 @@ type Transfer struct {
 	From      string
 	To        string
 	Amount    float64
-	CreatedAt time.Time
+	Timestamp time.Time // time the block was mined (from block header)
+	CreatedAt time.Time // time the record was inserted into storage
 }
 
 // Storage is the interface any persistence backend must satisfy.

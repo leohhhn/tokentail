@@ -2,6 +2,8 @@
 
 A CLI tool for watching ERC-20 token transfer events on EVM-compatible chains in real time. Connect to any WebSocket RPC endpoint, configure filters interactively, and stream matching transfers to your terminal or export them to CSV or Markdown.
 
+![start_menu](./start_menu.png)
+
 ---
 
 ## How it works
@@ -14,12 +16,12 @@ Token decimals and symbols for custom addresses are resolved on-chain via `eth_c
 
 ## Technologies
 
-| Package | Role |
-|---------|------|
-| [`go-ethereum`](https://github.com/ethereum/go-ethereum) v1.17 | Ethereum client, ABI encoding/decoding, log subscription |
-| [`charmbracelet/huh`](https://github.com/charmbracelet/huh) v1.0 | Interactive terminal form for configuration |
-| [`joho/godotenv`](https://github.com/joho/godotenv) | `.env` file loading |
-| Go standard library | `encoding/csv`, `math/big`, `context`, signal handling |
+| Package                                                          | Role                                                     |
+| ---------------------------------------------------------------- | -------------------------------------------------------- |
+| [`go-ethereum`](https://github.com/ethereum/go-ethereum) v1.17   | Ethereum client, ABI encoding/decoding, log subscription |
+| [`charmbracelet/huh`](https://github.com/charmbracelet/huh) v1.0 | Interactive terminal form for configuration              |
+| [`joho/godotenv`](https://github.com/joho/godotenv)              | `.env` file loading                                      |
+| Go standard library                                              | `encoding/csv`, `math/big`, `context`, signal handling   |
 
 Requires **Go 1.24+**.
 
@@ -31,11 +33,11 @@ Requires **Go 1.24+**.
 
 Predefined quick-select tokens:
 
-| Symbol | Network | Decimals | Contract |
-|--------|---------|----------|----------|
-| USDC | Ethereum Mainnet | 6 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
-| USDT | Ethereum Mainnet | 6 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
-| DAI | Ethereum Mainnet | 18 | `0x6B175474E89094C44Da98b954EedeAC495271d0F` |
+| Symbol | Network          | Decimals | Contract                                     |
+| ------ | ---------------- | -------- | -------------------------------------------- |
+| USDC   | Ethereum Mainnet | 6        | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` |
+| USDT   | Ethereum Mainnet | 6        | `0xdAC17F958D2ee523a2206206994597C13D831ec7` |
+| DAI    | Ethereum Mainnet | 18       | `0x6B175474E89094C44Da98b954EedeAC495271d0F` |
 
 Any ERC-20 token can be tracked by entering its contract address. The watcher calls `symbol()` and `decimals()` on-chain and resolves the token metadata before starting.
 
@@ -77,10 +79,10 @@ Optionally restrict output to transfers where a specific address appears as eith
 
 ### Output formats
 
-| Format | Description |
-|--------|-------------|
-| Terminal | Formatted multi-line output to stdout |
-| CSV | Appends a row per transfer to a file; writes header on creation |
+| Format   | Description                                                           |
+| -------- | --------------------------------------------------------------------- |
+| Terminal | Formatted multi-line output to stdout                                 |
+| CSV      | Appends a row per transfer to a file; writes header on creation       |
 | Markdown | Appends a table row per transfer to a file; writes header on creation |
 
 **CSV columns:** `block`, `tx_hash`, `from`, `to`, `amount`, `token`

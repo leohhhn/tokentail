@@ -6,24 +6,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+// fixedTime is the block timestamp used in all output writer fixtures.
+var fixedTime = time.Unix(1_700_000_000, 0).UTC() // 2023-11-14T22:13:20Z
 
 var sampleRecords = []transferRecord{
 	{
-		Block:  12_000_001,
-		TxHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		From:   "0x1111111111111111111111111111111111111111",
-		To:     "0x2222222222222222222222222222222222222222",
-		Amount: 1500.5,
-		Symbol: "USDC",
+		Block:     12_000_001,
+		Timestamp: fixedTime,
+		TxHash:    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		From:      "0x1111111111111111111111111111111111111111",
+		To:        "0x2222222222222222222222222222222222222222",
+		Amount:    1500.5,
+		Symbol:    "USDC",
 	},
 	{
-		Block:  12_000_002,
-		TxHash: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		From:   "0x3333333333333333333333333333333333333333",
-		To:     "0x4444444444444444444444444444444444444444",
-		Amount: 0.000001,
-		Symbol: "USDT",
+		Block:     12_000_002,
+		Timestamp: fixedTime,
+		TxHash:    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		From:      "0x3333333333333333333333333333333333333333",
+		To:        "0x4444444444444444444444444444444444444444",
+		Amount:    0.000001,
+		Symbol:    "USDT",
 	},
 }
 
@@ -60,8 +66,8 @@ func TestCSVWriter_HeaderAndRows(t *testing.T) {
 		t.Fatalf("expected 3 rows (header + 2 data), got %d", len(rows))
 	}
 
-	// header
-	wantHeader := []string{"block", "tx_hash", "from", "to", "amount", "token"}
+	// header — columns: block, timestamp, tx_hash, from, to, amount, token
+	wantHeader := []string{"block", "timestamp", "tx_hash", "from", "to", "amount", "token"}
 	for i, col := range wantHeader {
 		if rows[0][i] != col {
 			t.Errorf("header[%d]: got %q, want %q", i, rows[0][i], col)
@@ -70,13 +76,15 @@ func TestCSVWriter_HeaderAndRows(t *testing.T) {
 
 	// first data row
 	r0 := rows[1]
+	wantTS := fixedTime.Format(time.RFC3339)
 	checks := []struct{ col, got, want string }{
 		{"block", r0[0], "12000001"},
-		{"tx_hash", r0[1], sampleRecords[0].TxHash},
-		{"from", r0[2], sampleRecords[0].From},
-		{"to", r0[3], sampleRecords[0].To},
-		{"amount", r0[4], "1500.500000"},
-		{"token", r0[5], "USDC"},
+		{"timestamp", r0[1], wantTS},
+		{"tx_hash", r0[2], sampleRecords[0].TxHash},
+		{"from", r0[3], sampleRecords[0].From},
+		{"to", r0[4], sampleRecords[0].To},
+		{"amount", r0[5], "1500.500000"},
+		{"token", r0[6], "USDC"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -85,8 +93,8 @@ func TestCSVWriter_HeaderAndRows(t *testing.T) {
 	}
 
 	// second data row — spot-check amount precision for a tiny value
-	if rows[2][4] != "0.000001" {
-		t.Errorf("row2 amount: got %q, want %q", rows[2][4], "0.000001")
+	if rows[2][5] != "0.000001" {
+		t.Errorf("row2 amount: got %q, want %q", rows[2][5], "0.000001")
 	}
 }
 
@@ -145,8 +153,8 @@ func TestMarkdownWriter_HeaderAndRows(t *testing.T) {
 		t.Fatalf("expected 4 lines, got %d:\n%s", len(lines), string(raw))
 	}
 
-	// header
-	if !strings.HasPrefix(lines[0], "| Block |") {
+	// header contains Block and Timestamp columns
+	if !strings.HasPrefix(lines[0], "| Block |") || !strings.Contains(lines[0], "Timestamp") {
 		t.Errorf("line 0 (header): got %q", lines[0])
 	}
 
@@ -163,18 +171,18 @@ func TestMarkdownWriter_HeaderAndRows(t *testing.T) {
 		}
 	}
 
-	// first data row contains expected values
+	// first data row contains expected values including timestamp
 	row1 := lines[2]
-	for _, want := range []string{"12000001", sampleRecords[0].TxHash, "1500.50", "USDC"} {
+	wantTS := fixedTime.Format(time.RFC3339)
+	for _, want := range []string{"12000001", wantTS, sampleRecords[0].TxHash, "1500.50", "USDC"} {
 		if !strings.Contains(row1, want) {
 			t.Errorf("row1 missing %q:\n  %s", want, row1)
 		}
 	}
 
 	// second data row
-	row2 := lines[3]
-	if !strings.Contains(row2, "USDT") {
-		t.Errorf("row2 missing token symbol:\n  %s", row2)
+	if !strings.Contains(lines[3], "USDT") {
+		t.Errorf("row2 missing token symbol:\n  %s", lines[3])
 	}
 }
 
@@ -202,11 +210,15 @@ func TestMarkdownWriter_RowFormat(t *testing.T) {
 		t.Errorf("data line must be wrapped in pipes: %q", dataLine)
 	}
 
-	// tx hash and addresses must be backtick-quoted
-	if !strings.Contains(dataLine, "`"+rec.TxHash+"`") {
-		t.Errorf("tx hash not backtick-quoted in: %q", dataLine)
-	}
-	if !strings.Contains(dataLine, "`"+rec.From+"`") {
-		t.Errorf("from address not backtick-quoted in: %q", dataLine)
+	// timestamp, tx hash, and addresses must be backtick-quoted
+	wantTS := fixedTime.Format(time.RFC3339)
+	for _, want := range []string{
+		"`" + wantTS + "`",
+		"`" + rec.TxHash + "`",
+		"`" + rec.From + "`",
+	} {
+		if !strings.Contains(dataLine, want) {
+			t.Errorf("expected backtick-quoted %q in: %q", want, dataLine)
+		}
 	}
 }

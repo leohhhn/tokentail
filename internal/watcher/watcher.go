@@ -186,13 +186,21 @@ func (w *Watcher) printLog(ctx context.Context, l types.Log) {
 		return
 	}
 
+	var blockTime time.Time
+	if header, err := w.client.HeaderByNumber(ctx, new(big.Int).SetUint64(l.BlockNumber)); err != nil {
+		log.Printf("fetch block %d header: %v", l.BlockNumber, err)
+	} else {
+		blockTime = time.Unix(int64(header.Time), 0).UTC()
+	}
+
 	rec := transferRecord{
-		Block:  l.BlockNumber,
-		TxHash: l.TxHash.Hex(),
-		From:   from.Hex(),
-		To:     to.Hex(),
-		Amount: amount,
-		Symbol: w.cfg.Token.Symbol,
+		Block:     l.BlockNumber,
+		Timestamp: blockTime,
+		TxHash:    l.TxHash.Hex(),
+		From:      from.Hex(),
+		To:        to.Hex(),
+		Amount:    amount,
+		Symbol:    w.cfg.Token.Symbol,
 	}
 
 	if err := w.writer.write(rec); err != nil {
@@ -208,6 +216,7 @@ func (w *Watcher) printLog(ctx context.Context, l types.Log) {
 			From:      rec.From,
 			To:        rec.To,
 			Amount:    rec.Amount,
+			Timestamp: rec.Timestamp,
 			CreatedAt: time.Now(),
 		}
 		if err := store.SaveTransfer(ctx, t); err != nil {

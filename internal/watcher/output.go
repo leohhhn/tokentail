@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // OutputFormat selects where and how transfer records are written.
@@ -18,12 +19,13 @@ const (
 
 // transferRecord is the in-memory representation of a single Transfer event passed to output writers.
 type transferRecord struct {
-	Block  uint64
-	TxHash string
-	From   string
-	To     string
-	Amount float64
-	Symbol string
+	Block     uint64
+	Timestamp time.Time
+	TxHash    string
+	From      string
+	To        string
+	Amount    float64
+	Symbol    string
 }
 
 // transferWriter is the sink that receives decoded transfer records for formatting and output.
@@ -48,8 +50,8 @@ func newTransferWriter(format OutputFormat, path string) (transferWriter, error)
 type stdoutWriter struct{}
 
 func (w *stdoutWriter) write(r transferRecord) error {
-	fmt.Printf("block=%-9d  tx=%s\n  from=%s\n  to  =%s\n  amount=%.2f %s\n",
-		r.Block, r.TxHash, r.From, r.To, r.Amount, r.Symbol)
+	fmt.Printf("block=%-9d  time=%s  tx=%s\n  from=%s\n  to  =%s\n  amount=%.2f %s\n",
+		r.Block, r.Timestamp.UTC().Format(time.RFC3339), r.TxHash, r.From, r.To, r.Amount, r.Symbol)
 	return nil
 }
 
@@ -68,7 +70,7 @@ func newCSVWriter(path string) (*csvWriter, error) {
 		return nil, err
 	}
 	w := csv.NewWriter(f)
-	if err := w.Write([]string{"block", "tx_hash", "from", "to", "amount", "token"}); err != nil {
+	if err := w.Write([]string{"block", "timestamp", "tx_hash", "from", "to", "amount", "token"}); err != nil {
 		f.Close()
 		return nil, err
 	}
@@ -79,6 +81,7 @@ func newCSVWriter(path string) (*csvWriter, error) {
 func (w *csvWriter) write(r transferRecord) error {
 	return w.csv.Write([]string{
 		strconv.FormatUint(r.Block, 10),
+		r.Timestamp.UTC().Format(time.RFC3339),
 		r.TxHash,
 		r.From,
 		r.To,
@@ -103,8 +106,8 @@ func newMarkdownWriter(path string) (*markdownWriter, error) {
 	if err != nil {
 		return nil, err
 	}
-	header := "| Block | Transaction Hash | From | To | Amount | Token |\n" +
-		"|------:|:-----------------|:-----|:---|-------:|:------|\n"
+	header := "| Block | Timestamp | Transaction Hash | From | To | Amount | Token |\n" +
+		"|------:|:----------|:-----------------|:-----|:---|-------:|:------|\n"
 	if _, err := fmt.Fprint(f, header); err != nil {
 		f.Close()
 		return nil, err
@@ -113,8 +116,8 @@ func newMarkdownWriter(path string) (*markdownWriter, error) {
 }
 
 func (w *markdownWriter) write(r transferRecord) error {
-	_, err := fmt.Fprintf(w.f, "| %d | `%s` | `%s` | `%s` | %.2f | %s |\n",
-		r.Block, r.TxHash, r.From, r.To, r.Amount, r.Symbol)
+	_, err := fmt.Fprintf(w.f, "| %d | `%s` | `%s` | `%s` | `%s` | %.2f | %s |\n",
+		r.Block, r.Timestamp.UTC().Format(time.RFC3339), r.TxHash, r.From, r.To, r.Amount, r.Symbol)
 	return err
 }
 
