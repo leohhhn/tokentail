@@ -2,7 +2,15 @@
 
 ## Current state
 
-The watcher connects to an EVM node, subscribes to ERC-20 Transfer events, applies filters, and writes output to stdout, CSV, or Markdown. There is no persistent storage and no test coverage.
+The watcher connects to an EVM node, subscribes to ERC-20 Transfer events, applies filters, and writes output to stdout, CSV, or Markdown.
+
+- `Storage` interface and `Transfer` struct defined in `internal/storage/storage.go`
+- `EthClient` interface extracted in `internal/watcher/client.go`
+- In-memory `Storage` implementation in `internal/storage/memory/`
+- `Watcher.Config` accepts an optional `Store storage.Storage`; each matched transfer is written to it if non-nil
+- 13 unit tests covering filter logic (`TestPrintLog_*`, `TestDecimalsToFactor`) and output writers (`TestCSVWriter_*`, `TestMarkdownWriter_*`)
+
+No PostgreSQL implementation, integration tests, or `DATABASE_URL` wiring yet.
 
 ---
 
@@ -178,10 +186,10 @@ tokentail/
 
 ## Order of work
 
-1. Define `Storage` interface and `Transfer` struct — no DB yet
-2. Extract `EthClient` interface in the watcher package
-3. Write unit tests for filter logic using a mock `Storage` and mock `EthClient`
-4. Write in-memory `Storage` implementation (used by unit tests as a spy)
+1. ~~Define `Storage` interface and `Transfer` struct — no DB yet~~ ✓
+2. ~~Extract `EthClient` interface in the watcher package~~ ✓
+3. ~~Write unit tests for filter logic using a mock `Storage` and mock `EthClient`~~ ✓
+4. ~~Write in-memory `Storage` implementation (used by unit tests as a spy)~~ ✓
 5. Add PostgreSQL implementation with migrations
 6. Write integration tests with `testcontainers-go`
 7. Wire `DATABASE_URL` into `main.go` and the huh form (optional DB toggle)
