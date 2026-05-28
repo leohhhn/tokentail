@@ -60,9 +60,10 @@ type Config struct {
 
 // Watcher subscribes to Transfer logs for a single ERC-20 token and writes matching events to its configured output.
 type Watcher struct {
-	client EthClient
-	cfg    Config
-	writer transferWriter
+	client      EthClient
+	cfg         Config
+	writer      transferWriter
+	headerCache map[uint64]*types.Header
 }
 
 var chainNames = map[int64]string{
@@ -107,7 +108,7 @@ func New(client EthClient, cfg Config) (*Watcher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open output: %w", err)
 	}
-	return &Watcher{client: client, cfg: cfg, writer: writer}, nil
+	return &Watcher{client: client, cfg: cfg, writer: writer, headerCache: make(map[uint64]*types.Header)}, nil
 }
 
 // Close flushes and closes the output writer, storage backend, and RPC client.
@@ -163,6 +164,19 @@ func (w *Watcher) Start(ctx context.Context) error {
 	}
 }
 
+// cachedHeader returns the block header for blockNum, fetching it from the node only on the first call per block.
+func (w *Watcher) cachedHeader(ctx context.Context, blockNum uint64) (*types.Header, error) {
+	if h, ok := w.headerCache[blockNum]; ok {
+		return h, nil
+	}
+	h, err := w.client.HeaderByNumber(ctx, new(big.Int).SetUint64(blockNum))
+	if err != nil {
+		return nil, err
+	}
+	w.headerCache[blockNum] = h
+	return h, nil
+}
+
 // printLog applies all configured filters to a raw log and, if it passes, writes it to the output and storage.
 func (w *Watcher) printLog(ctx context.Context, l types.Log) {
 	if len(l.Topics) != 3 || l.Topics[0] != transferSig {
@@ -187,7 +201,7 @@ func (w *Watcher) printLog(ctx context.Context, l types.Log) {
 	}
 
 	var blockTime time.Time
-	if header, err := w.client.HeaderByNumber(ctx, new(big.Int).SetUint64(l.BlockNumber)); err != nil {
+	if header, err := w.cachedHeader(ctx, l.BlockNumber); err != nil {
 		log.Printf("fetch block %d header: %v", l.BlockNumber, err)
 	} else {
 		blockTime = time.Unix(int64(header.Time), 0).UTC()

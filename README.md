@@ -12,6 +12,8 @@ On startup, tokentail connects to an Ethereum node over WebSocket and uses `eth_
 
 Token decimals and symbols for custom addresses are resolved on-chain via `eth_call` against the ERC-20 `symbol()` and `decimals()` view functions before the subscription starts.
 
+For each matched transfer, tokentail fetches the block header via `eth_getBlockByNumber` to resolve the block timestamp. This timestamp is stored as a `time.Time` value (UTC) and included in all output formats (terminal, CSV, Markdown).
+
 ---
 
 ## Technologies
@@ -85,9 +87,9 @@ Optionally restrict output to transfers where a specific address appears as eith
 | CSV      | Appends a row per transfer to a file; writes header on creation       |
 | Markdown | Appends a table row per transfer to a file; writes header on creation |
 
-**CSV columns:** `block`, `tx_hash`, `from`, `to`, `amount`, `token`
+**CSV columns:** `block`, `timestamp`, `tx_hash`, `from`, `to`, `amount`, `token`
 
-**Markdown columns:** Block, Transaction Hash, From, To, Amount, Token — addresses and hashes rendered in monospace via backticks.
+**Markdown columns:** Block, Timestamp, Transaction Hash, From, To, Amount, Token — addresses and hashes rendered in monospace via backticks.
 
 Output files are created when the watcher starts and flushed and closed on shutdown (Ctrl+C / SIGTERM).
 
@@ -122,13 +124,22 @@ The interactive form walks through:
 ```
 tokentail/
 ├── cmd/watcher/
-│   └── main.go          # Entry point, interactive form, wiring
-├── internal/watcher/
-│   ├── watcher.go       # Watcher type, Config, token definitions, chain map
-│   ├── resolve.go       # On-chain ERC-20 symbol/decimals resolution
-│   └── output.go        # Output writers (stdout, CSV, Markdown)
+│   └── main.go                  # Entry point, interactive huh form, wiring
+├── internal/
+│   ├── watcher/
+│   │   ├── watcher.go           # Watcher type, Config, token definitions, chain map, timestamp fetching
+│   │   ├── client.go            # EthClient interface (enables mocking in tests)
+│   │   ├── resolve.go           # On-chain ERC-20 symbol/decimals resolution via eth_call
+│   │   ├── output.go            # transferRecord type; stdout, CSV, and Markdown writers
+│   │   ├── watcher_test.go      # Filter logic and decimal conversion tests
+│   │   └── output_test.go       # CSV and Markdown writer tests
+│   └── storage/
+│       ├── storage.go           # Storage interface + Transfer struct
+│       └── memory/
+│           └── memory.go        # In-memory implementation (spy used in tests)
 ├── .env.example
-└── go.mod
+├── go.mod
+└── PLAN.md
 ```
 
 ---

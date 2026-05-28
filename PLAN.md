@@ -55,7 +55,84 @@ watcher.Config {
 
 ---
 
-## Phase 2 — PostgreSQL implementation
+## Phase 2 — REST API & server mode
+
+### Overview
+
+Add a `--server` flag that launches tokentail in server mode: reads config from environment variables, starts the watcher in the background, and exposes an HTTP API for querying collected transfers. The default (no flag) retains the existing interactive CLI behaviour.
+
+### Run modes
+
+| Mode | Trigger | Behaviour |
+|------|---------|-----------|
+| CLI (default) | `go run ./cmd/watcher` | Interactive huh form, output to stdout/CSV/Markdown |
+| Server | `go run ./cmd/watcher --server` | Reads config from env, runs watcher + HTTP server |
+
+### HTTP endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/transfers` | List collected transfers; supports `?token=`, `?from=`, `?to=`, `?limit=`, `?offset=` |
+| `GET` | `/transfers/{txHash}` | Fetch a single transfer by transaction hash |
+| `GET` | `/status` | Watcher status: connected chain, token, filter config, transfer count |
+
+### Storage interface additions
+
+Server mode requires read access to stored transfers. Extend the `Storage` interface:
+
+```go
+type Storage interface {
+    SaveTransfer(ctx context.Context, t Transfer) error
+    GetTransfers(ctx context.Context, filter TransferFilter) ([]Transfer, error)
+    GetTransferByTxHash(ctx context.Context, txHash string) (*Transfer, error)
+    Close() error
+}
+
+type TransferFilter struct {
+    Token  string
+    From   string
+    To     string
+    Limit  int
+    Offset int
+}
+```
+
+When no `DATABASE_URL` is set, falls back to the in-memory store so the API serves whatever was accumulated since the watcher started.
+
+### Configuration (server mode)
+
+All config is read from the environment — no interactive form:
+
+```bash
+# .env
+ETH_RPC_URL=wss://...
+TOKEN_ADDRESS=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+MIN_AMOUNT=0
+MAX_AMOUNT=0
+SERVER_PORT=8080        # default: 8080
+```
+
+### Package layout (after this phase)
+
+```
+tokentail/
+├── cmd/watcher/
+│   └── main.go              # --server flag; env-based config path
+├── internal/
+│   ├── api/
+│   │   ├── server.go        # HTTP server setup, graceful shutdown
+│   │   └── handlers.go      # Handler functions, JSON encoding
+│   ├── watcher/
+│   │   └── ...
+│   └── storage/
+│       └── ...
+```
+
+Uses standard `net/http` — no external router dependency.
+
+---
+
+## Phase 3 — PostgreSQL implementation
 
 ### Package layout
 
@@ -81,6 +158,7 @@ CREATE TABLE transfers (
     from_addr  CHAR(42)      NOT NULL,
     to_addr    CHAR(42)      NOT NULL,
     amount     NUMERIC(36,6) NOT NULL,
+    ts         TIMESTAMPTZ   NOT NULL,
     created_at TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
 
     UNIQUE (tx_hash, log_index)   -- deduplication guard
@@ -112,7 +190,7 @@ If `DATABASE_URL` is not set, the watcher starts without DB persistence (no erro
 
 ---
 
-## Phase 3 — Testing
+## Phase 4 — Testing
 
 ### Layers
 
@@ -160,11 +238,16 @@ tokentail/
 ├── cmd/watcher/
 │   └── main.go
 ├── internal/
+│   ├── api/
+│   │   ├── server.go
+│   │   └── handlers.go
 │   ├── watcher/
 │   │   ├── watcher.go
 │   │   ├── client.go       # EthClient interface
 │   │   ├── resolve.go
-│   │   └── output.go
+│   │   ├── output.go
+│   │   ├── watcher_test.go
+│   │   └── output_test.go
 │   └── storage/
 │       ├── storage.go      # Storage interface + Transfer
 │       ├── memory/
@@ -190,6 +273,9 @@ tokentail/
 2. ~~Extract `EthClient` interface in the watcher package~~ ✓
 3. ~~Write unit tests for filter logic using a mock `Storage` and mock `EthClient`~~ ✓
 4. ~~Write in-memory `Storage` implementation (used by unit tests as a spy)~~ ✓
-5. Add PostgreSQL implementation with migrations
-6. Write integration tests with `testcontainers-go`
-7. Wire `DATABASE_URL` into `main.go` and the huh form (optional DB toggle)
+5. Extend `Storage` interface with read methods (`GetTransfers`, `GetTransferByTxHash`)
+6. Add `internal/api` package with HTTP server and handlers
+7. Wire `--server` flag into `main.go`; env-based config path
+8. Add PostgreSQL implementation with migrations
+9. Write integration tests with `testcontainers-go`
+10. Wire `DATABASE_URL` into `main.go`

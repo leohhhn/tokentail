@@ -56,9 +56,10 @@ func buildLog(block uint64, from, to common.Address, amount *big.Int) types.Log 
 func newTestWatcher(cfg Config, store *memory.Store) *Watcher {
 	cfg.Store = store
 	return &Watcher{
-		client: &mockClient{},
-		cfg:    cfg,
-		writer: &stdoutWriter{},
+		client:      &mockClient{},
+		cfg:         cfg,
+		writer:      &stdoutWriter{},
+		headerCache: make(map[uint64]*types.Header),
 	}
 }
 
@@ -246,3 +247,26 @@ func TestPrintLog_StorageFields(t *testing.T) {
 
 // Compile-time check: *memory.Store satisfies storage.Storage.
 var _ storage.Storage = (*memory.Store)(nil)
+
+func BenchmarkPrintLog(b *testing.B) {
+      store := memory.New()
+      w := newTestWatcher(Config{
+          Token:     tokens[0], // USDC
+          MinAmount: 0,
+      }, store)
+
+      from := common.Address{1}
+      to := common.Address{2}
+      raw := new(big.Int).Mul(big.NewInt(5000), big.NewInt(1e6)) // 5000 USDC
+
+      // Pre-build logs across N distinct blocks to exercise both cache hit and miss paths
+      logs := make([]types.Log, b.N)
+      for i := range logs {
+          logs[i] = buildLog(uint64(i%100), from, to, raw) // 100 unique blocks → cache saturates quickly
+      }
+
+      b.ResetTimer()
+      for i := range logs {
+          w.printLog(context.Background(), logs[i])
+      }
+  }
