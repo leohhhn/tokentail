@@ -267,15 +267,233 @@ tokentail/
 
 ---
 
+---
+
+## Phase 5 — Docker
+
+### Goal
+
+A single `docker compose up` should start the watcher in server mode + a PostgreSQL database, with no local Go toolchain required.
+
+### Files
+
+```
+tokentail/
+├── Dockerfile               # multi-stage: build → minimal runtime image
+├── docker-compose.yml       # watcher + postgres services
+└── .env.example             # documents all required env vars
+```
+
+### Dockerfile
+
+Multi-stage build to keep the runtime image small:
+
+```dockerfile
+# Stage 1 — build
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o tokentail ./cmd/watcher
+
+# Stage 2 — runtime
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=builder /app/tokentail .
+ENTRYPOINT ["./tokentail", "--server"]
+```
+
+`ca-certificates` is needed for TLS connections to WSS RPC endpoints.
+
+### docker-compose.yml
+
+```yaml
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: tokentail
+      POSTGRES_PASSWORD: tokentail
+      POSTGRES_DB: tokentail
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tokentail"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  watcher:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://tokentail:tokentail@db:5432/tokentail?sslmode=disable
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+```
+
+The `healthcheck` + `depends_on: condition: service_healthy` ensures the watcher waits for Postgres to be ready before starting, so migrations don't race the DB.
+
+---
+
+## Phase 6 — Observability
+
+Production services need to expose their internal state. Three pillars:
+
+### Structured logging
+
+Replace `fmt.Printf` / `log.Printf` with [`zerolog`](https://github.com/rs/zerolog). Every log line is a JSON object with `level`, `time`, `component`, and contextual fields (block number, tx hash, token address). Makes logs parseable by Datadog, Loki, CloudWatch, etc.
+
+```go
+log.Info().
+    Uint64("block", transfer.Block).
+    Str("tx", transfer.TxHash).
+    Float64("amount", transfer.Amount).
+    Msg("transfer matched")
+```
+
+### Prometheus metrics
+
+Expose `GET /metrics` (standard Prometheus scrape endpoint). Key metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `tokentail_transfers_total` | Counter | Transfers matched since startup |
+| `tokentail_blocks_processed_total` | Counter | Blocks seen |
+| `tokentail_rpc_reconnects_total` | Counter | Websocket reconnections |
+| `tokentail_api_requests_total` | Counter | HTTP requests by method + path + status |
+| `tokentail_api_request_duration_seconds` | Histogram | API latency |
+
+Add a `prometheus` service to `docker-compose.yml` + a Grafana service with a pre-built dashboard JSON — so `docker compose up` gives you a live dashboard out of the box.
+
+### Health & readiness endpoints
+
+Required for load balancers and Kubernetes probes:
+
+| Endpoint | Returns | Healthy when |
+|----------|---------|--------------|
+| `GET /healthz` | `200 OK` | Process is alive |
+| `GET /readyz` | `200 OK` | DB reachable + watcher subscribed |
+
+`/readyz` returns `503` during startup or after RPC disconnect so a load balancer can remove the instance from rotation.
+
+---
+
+## Phase 7 — Resilience & correctness
+
+These close the gap between "it runs" and "it runs reliably."
+
+### Graceful shutdown
+
+On `SIGTERM`/`SIGINT`: stop accepting new API requests, drain in-flight handlers (with a deadline), close the watcher subscription, flush any pending DB writes, then exit 0. Required for zero-downtime deploys and clean container stops.
+
+### RPC reconnection
+
+WebSocket connections to EVM nodes drop. The watcher should reconnect with exponential backoff (cap ~30s), re-subscribe to the filter, and continue from the last processed block. Log each reconnect attempt and increment `tokentail_rpc_reconnects_total`.
+
+### Block reorg handling
+
+Reorgs can invalidate transfers already written to the DB. When the watcher receives a log with `Removed: true` (go-ethereum sets this on reorgs), delete the corresponding row from `transfers` using `(tx_hash, log_index)`. Add a `removed` migration if needed.
+
+### Multi-token support
+
+Currently one token per watcher instance. Extend `Config` to accept a slice of token addresses; the filter query passes all addresses to `FilterQuery.Addresses`. The `transfers` table already stores `token` per row so no schema change is needed.
+
+---
+
+## Phase 8 — Features
+
+### Historical backfill
+
+Add a `--backfill-from <block>` flag (or `BACKFILL_FROM` env var in server mode). On startup, before subscribing to new logs, scan past blocks using `FilterLogs` and insert any matching transfers. Uses the same `SaveTransfer` path so deduplication is free via the `(tx_hash, log_index)` unique constraint.
+
+### WebSocket streaming endpoint
+
+`GET /ws/transfers` — upgrades to WebSocket and pushes each new matched transfer as a JSON object in real time. The watcher broadcasts to an internal fan-out bus; the WS handler subscribes to it. Useful for dashboards that don't want to poll.
+
+### Webhook notifications
+
+`POST /webhooks` — register a URL + optional filter (min amount, specific address). When a transfer matches, POST a JSON payload to the registered URL with retry logic (3 attempts, exponential backoff). Webhooks are stored in the DB so they survive restarts.
+
+### API key authentication
+
+Add an `api_keys` table. Requests to non-public endpoints require `Authorization: Bearer <key>`. Key creation is handled via a CLI command (`tokentail keys create`) or a seeded key from an env var for simple deployments.
+
+---
+
+## Phase 9 — CI/CD
+
+### GitHub Actions
+
+```
+.github/workflows/
+├── ci.yml       # on push/PR: go vet, golangci-lint, go test ./...
+└── release.yml  # on tag: build multi-arch image, push to GHCR
+```
+
+**`ci.yml` steps:**
+1. `golangci-lint` (includes `errcheck`, `staticcheck`, `gosec`)
+2. `go test ./... -race -count=1` — race detector on every run
+3. Integration tests via `testcontainers-go` (spins up Postgres in CI)
+
+**`release.yml` steps:**
+1. `docker buildx build --platform linux/amd64,linux/arm64`
+2. Push to `ghcr.io/<owner>/tokentail:<tag>` and `:latest`
+3. Create GitHub Release with changelog from `git log`
+
+Multi-arch (`amd64` + `arm64`) means the image runs natively on Apple Silicon and AWS Graviton without emulation.
+
+### Versioning
+
+Embed build metadata at compile time via `-ldflags`:
+
+```go
+// cmd/watcher/main.go
+var (
+    version = "dev"
+    commit  = "none"
+    date    = "unknown"
+)
+```
+
+Exposed on `GET /status` so you can always tell which build is running.
+
+---
+
 ## Order of work
 
 1. ~~Define `Storage` interface and `Transfer` struct — no DB yet~~ ✓
 2. ~~Extract `EthClient` interface in the watcher package~~ ✓
 3. ~~Write unit tests for filter logic using a mock `Storage` and mock `EthClient`~~ ✓
 4. ~~Write in-memory `Storage` implementation (used by unit tests as a spy)~~ ✓
-5. Extend `Storage` interface with read methods (`GetTransfers`, `GetTransferByTxHash`)
+5. ~~Extend `Storage` interface with read methods (`GetTransfers`, `GetTransferByTxHash`)~~ ✓
 6. Add `internal/api` package with HTTP server and handlers
 7. Wire `--server` flag into `main.go`; env-based config path
 8. Add PostgreSQL implementation with migrations
 9. Write integration tests with `testcontainers-go`
 10. Wire `DATABASE_URL` into `main.go`
+11. Write `Dockerfile` (multi-stage build) and `docker-compose.yml`
+12. Write `.env.example` documenting all required vars
+13. Add structured logging with `zerolog`
+14. Add Prometheus metrics + `/metrics` endpoint
+15. Add `/healthz` and `/readyz` endpoints
+16. Add Grafana + Prometheus to `docker-compose.yml`
+17. Implement graceful shutdown (SIGTERM drain)
+18. Implement RPC reconnection with exponential backoff
+19. Handle block reorg (`Removed: true` log events)
+20. Multi-token support (`Config.Tokens []string`)
+21. Historical backfill (`--backfill-from <block>`)
+22. WebSocket streaming endpoint (`/ws/transfers`)
+23. Webhook notifications with retry
+24. API key authentication
+25. GitHub Actions CI (lint + test + integration)
+26. GitHub Actions release (multi-arch image → GHCR)
+27. Embed version/commit/date via `-ldflags`
